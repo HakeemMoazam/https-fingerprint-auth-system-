@@ -1,0 +1,215 @@
+#include <Adafruit_Fingerprint.h>
+#include <SoftwareSerial.h>
+#include <LiquidCrystal.h>
+
+// --- Hardware Pin Configurations ---
+// Fingerprint Sensor: RX to Pin 10, TX to Pin 9 (SoftwareSerial)
+SoftwareSerial fingerSerial(10, 9);
+Adafruit_Fingerprint finger = Adafruit_Fingerprint(&fingerSerial);
+
+// Parallel 16x2 LCD layout (RS, Enable, D4, D5, D6, D7)
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+
+void setup() {
+  Serial.begin(9600);
+  lcd.begin(16, 2);
+  
+  lcd.print("System Booting...");
+  delay(1000);
+
+  // Initialize fingerprint sensor
+  finger.begin(57600);
+  if (finger.verifyPassword()) {
+    lcd.clear();
+    lcd.print("Sensor Found!");
+    Serial.println("Found fingerprint sensor.");
+  } else {
+    lcd.clear();
+    lcd.print("Sensor Error!");
+    Serial.println("Did not find fingerprint sensor :(");
+    while (1) { delay(1); }
+  }
+
+  delay(1500);
+  displayDefaultMessage();
+  printMenu();
+}
+
+void loop() {
+  // 1. Default Behavior: Scan for matching fingers
+  verifyFinger();
+
+  // 2. Serial Admin Commands (Enroll / Delete)
+  if (Serial.available()) {
+    char cmd = Serial.read();
+    if (cmd == 'e') {
+      enrollFinger();
+    } else if (cmd == 'd') {
+      deleteFinger();
+    }
+    printMenu();
+    displayDefaultMessage();
+  }
+  
+  delay(50); 
+}
+
+// --- Helper Functions ---
+
+void displayDefaultMessage() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("  Place Finger  ");
+  lcd.setCursor(0, 1);
+  lcd.print(" Ready to Scan  ");
+}
+
+void printMenu() {
+  Serial.println("\n--- Biometric Admin Control ---");
+  Serial.println("Type 'e' to ENROLL a new fingerprint");
+  Serial.println("Type 'd' to DELETE an existing fingerprint ID");
+  Serial.println("--------------------------------");
+}
+
+// 1. Verification Mode
+void verifyFinger() {
+  int p = finger.getImage();
+  if (p != FINGERPRINT_OK) return; 
+
+  p = finger.image2Tz();
+  if (p != FINGERPRINT_OK) {
+    showAccessDenied("Image Error");
+    return;
+  }
+
+  p = finger.fingerFastSearch();
+  if (p == FINGERPRINT_OK) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("ACCESS GRANTED!");
+    lcd.setCursor(0, 1);
+    lcd.print("Welcome ID: #");
+    lcd.print(finger.fingerID);
+    
+    Serial.print("Access Granted! Found ID #");
+    Serial.print(finger.fingerID);
+    Serial.print(" with confidence of ");
+    Serial.println(finger.confidence);
+    
+    delay(3000); 
+    displayDefaultMessage();
+  } else {
+    showAccessDenied("Unknown User");
+  }
+}
+
+void showAccessDenied(String reason) {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("ACCESS DENIED!");
+  lcd.setCursor(0, 1);
+  lcd.print(reason);
+  
+  Serial.println("Access Denied: " + reason);
+  delay(2500);
+  displayDefaultMessage();
+}
+
+// 2. Enrollment Mode
+void enrollFinger() {
+  Serial.println("\n[ENROLLMENT MODE]");
+  Serial.println("Enter the ID # (1 to 127) you want to save this finger as:");
+  
+  while (!Serial.available());
+  int id = Serial.parseInt();
+  if (id == 0 || id > 127) {
+    Serial.println("Invalid ID. Exiting enrollment.");
+    return;
+  }
+
+  lcd.clear();
+  lcd.print("Enrolling ID: ");
+  lcd.print(id);
+  lcd.setCursor(0, 1);
+  lcd.print("Place Finger...");
+  
+  Serial.print("Enrolling ID #");
+  Serial.println(id);
+
+  int p = -1;
+  while (p != FINGERPRINT_OK) {
+    p = finger.getImage();
+  }
+  p = finger.image2Tz(1);
+  if (p != FINGERPRINT_OK) {
+    Serial.println("Conversion error.");
+    return;
+  }
+
+  lcd.clear();
+  lcd.print("Remove Finger");
+  Serial.println("Remove finger...");
+  delay(2000);
+  p = 0;
+  while (p != FINGERPRINT_NOFINGER) {
+    p = finger.getImage();
+  }
+
+  lcd.clear();
+  lcd.print("Place Same Again");
+  Serial.println("Place the same finger again...");
+  p = -1;
+  while (p != FINGERPRINT_OK) {
+    p = finger.getImage();
+  }
+
+  p = finger.image2Tz(2);
+  if (p != FINGERPRINT_OK) {
+    Serial.println("Conversion error.");
+    return;
+  }
+
+  p = finger.createModel();
+  if (p == FINGERPRINT_OK) {
+    p = finger.storeModel(id);
+    if (p == FINGERPRINT_OK) {
+      lcd.clear();
+      lcd.print("SUCCESS!");
+      lcd.setCursor(0, 1);
+      lcd.print("Saved to ID #");
+      lcd.print(id);
+      Serial.println("Stored successfully!");
+    } else {
+      Serial.println("Error storing model.");
+    }
+  } else {
+    Serial.println("Fingerprints did not match.");
+  }
+  delay(2000);
+}
+
+// 3. Deletion Mode
+void deleteFinger() {
+  Serial.println("\n[DELETION MODE]");
+  Serial.println("Enter the ID # (1 to 127) you want to delete:");
+  
+  while (!Serial.available());
+  int id = Serial.parseInt();
+  if (id == 0) return;
+
+  lcd.clear();
+  lcd.print("Deleting ID: ");
+  lcd.print(id);
+
+  int p = finger.deleteModel(id);
+  lcd.clear();
+  if (p == FINGERPRINT_OK) {
+    lcd.print("ID Deleted.");
+    Serial.print("Successfully deleted ID #");
+    Serial.println(id);
+  } else {
+    lcd.print("Delete Failed.");
+    Serial.println("Failed to delete ID or ID not found.");
+  }
+  delay(2000);
+}
