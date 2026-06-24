@@ -3,58 +3,65 @@
 #include <LiquidCrystal.h>
 
 // --- Hardware Pin Configurations ---
-// Fingerprint Sensor: RX to Pin 10, TX to Pin 9 (SoftwareSerial)
+// Fingerprint Sensor: RX to Pin 10, TX to Pin 9
 SoftwareSerial fingerSerial(10, 9);
 Adafruit_Fingerprint finger = Adafruit_Fingerprint(&fingerSerial);
 
 // Parallel 16x2 LCD layout (RS, Enable, D4, D5, D6, D7)
 LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
 
+// --- 4-Button Hardware Configurations ---
+const int BTN_ENROLL = 6;  // Button 1: Enter Registration / Confirm
+const int BTN_DELETE = 7;  // Button 2: Enter Deletion / Cancel
+const int BTN_UP     = 8;  // Button 3: Increment ID number
+const int BTN_DOWN   = 13; // Button 4: Decrement ID number
+
 void setup() {
   Serial.begin(9600);
   lcd.begin(16, 2);
   
+  // Initialize Buttons with internal pullups (Active LOW configuration)
+  pinMode(BTN_ENROLL, INPUT_PULLUP);
+  pinMode(BTN_DELETE, INPUT_PULLUP);
+  pinMode(BTN_UP, INPUT_PULLUP);
+  pinMode(BTN_DOWN, INPUT_PULLUP);
+
   lcd.print("System Booting...");
   delay(1000);
 
-  // Initialize fingerprint sensor
   finger.begin(57600);
   if (finger.verifyPassword()) {
     lcd.clear();
     lcd.print("Sensor Found!");
-    Serial.println("Found fingerprint sensor.");
   } else {
     lcd.clear();
     lcd.print("Sensor Error!");
-    Serial.println("Did not find fingerprint sensor :(");
     while (1) { delay(1); }
   }
 
   delay(1500);
   displayDefaultMessage();
-  printMenu();
 }
 
 void loop() {
-  // 1. Default Behavior: Scan for matching fingers
+  // 1. Constantly scan for fingers in the background
   verifyFinger();
 
-  // 2. Serial Admin Commands (Enroll / Delete)
-  if (Serial.available()) {
-    char cmd = Serial.read();
-    if (cmd == 'e') {
-      enrollFinger();
-    } else if (cmd == 'd') {
-      deleteFinger();
-    }
-    printMenu();
+  // 2. Check physical button triggers
+  if (digitalRead(BTN_ENROLL) == LOW) {
+    delay(200); // Simple debounce
+    enrollFingerStandalone();
     displayDefaultMessage();
   }
   
+  if (digitalRead(BTN_DELETE) == LOW) {
+    delay(200); // Simple debounce
+    deleteFingerStandalone();
+    displayDefaultMessage();
+  }
+
   delay(50); 
 }
-
-// --- Helper Functions ---
 
 void displayDefaultMessage() {
   lcd.clear();
@@ -64,23 +71,13 @@ void displayDefaultMessage() {
   lcd.print(" Ready to Scan  ");
 }
 
-void printMenu() {
-  Serial.println("\n--- Biometric Admin Control ---");
-  Serial.println("Type 'e' to ENROLL a new fingerprint");
-  Serial.println("Type 'd' to DELETE an existing fingerprint ID");
-  Serial.println("--------------------------------");
-}
-
-// 1. Verification Mode
+// 1. Scanner Mode
 void verifyFinger() {
   int p = finger.getImage();
   if (p != FINGERPRINT_OK) return; 
 
   p = finger.image2Tz();
-  if (p != FINGERPRINT_OK) {
-    showAccessDenied("Image Error");
-    return;
-  }
+  if (p != FINGERPRINT_OK) return;
 
   p = finger.fingerFastSearch();
   if (p == FINGERPRINT_OK) {
@@ -90,65 +87,70 @@ void verifyFinger() {
     lcd.setCursor(0, 1);
     lcd.print("Welcome ID: #");
     lcd.print(finger.fingerID);
-    
-    Serial.print("Access Granted! Found ID #");
-    Serial.print(finger.fingerID);
-    Serial.print(" with confidence of ");
-    Serial.println(finger.confidence);
-    
     delay(3000); 
-    displayDefaultMessage();
   } else {
-    showAccessDenied("Unknown User");
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("ACCESS DENIED!");
+    lcd.setCursor(0, 1);
+    lcd.print("Unknown User");
+    delay(2500);
   }
-}
-
-void showAccessDenied(String reason) {
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("ACCESS DENIED!");
-  lcd.setCursor(0, 1);
-  lcd.print(reason);
-  
-  Serial.println("Access Denied: " + reason);
-  delay(2500);
   displayDefaultMessage();
 }
 
-// 2. Enrollment Mode
-void enrollFinger() {
-  Serial.println("\n[ENROLLMENT MODE]");
-  Serial.println("Enter the ID # (1 to 127) you want to save this finger as:");
+// 2. Standalone UI Enrollment Mode (Using Hardware Buttons)
+void enrollFingerStandalone() {
+  int targetId = 1;
+  lcd.clear();
   
-  while (!Serial.available());
-  int id = Serial.parseInt();
-  if (id == 0 || id > 127) {
-    Serial.println("Invalid ID. Exiting enrollment.");
-    return;
+  // Loop to pick the ID using UP/DOWN buttons
+  while (true) {
+    lcd.setCursor(0, 0);
+    lcd.print("Enroll New User ");
+    lcd.setCursor(0, 1);
+    lcd.print("Select ID: ");
+    lcd.print(targetId);
+    lcd.print("   "); // Clear trailing characters
+
+    if (digitalRead(BTN_UP) == LOW) {
+      targetId++;
+      if (targetId > 127) targetId = 1;
+      delay(200);
+    }
+    if (digitalRead(BTN_DOWN) == LOW) {
+      targetId--;
+      if (targetId < 1) targetId = 127;
+      delay(200);
+    }
+    if (digitalRead(BTN_DELETE) == LOW) {
+      // Treat delete button as a 'Cancel' action during setup
+      return; 
+    }
+    if (digitalRead(BTN_ENROLL) == LOW) {
+      // Treat enroll button as 'Confirm ID'
+      delay(500);
+      break; 
+    }
   }
 
   lcd.clear();
-  lcd.print("Enrolling ID: ");
-  lcd.print(id);
+  lcd.print("ID: "); lcd.print(targetId);
   lcd.setCursor(0, 1);
   lcd.print("Place Finger...");
-  
-  Serial.print("Enrolling ID #");
-  Serial.println(id);
 
+  // First Scan Loop
   int p = -1;
   while (p != FINGERPRINT_OK) {
     p = finger.getImage();
+    if (digitalRead(BTN_DELETE) == LOW) return; // Allow canceling out
   }
+  
   p = finger.image2Tz(1);
-  if (p != FINGERPRINT_OK) {
-    Serial.println("Conversion error.");
-    return;
-  }
+  if (p != FINGERPRINT_OK) return;
 
   lcd.clear();
   lcd.print("Remove Finger");
-  Serial.println("Remove finger...");
   delay(2000);
   p = 0;
   while (p != FINGERPRINT_NOFINGER) {
@@ -157,59 +159,74 @@ void enrollFinger() {
 
   lcd.clear();
   lcd.print("Place Same Again");
-  Serial.println("Place the same finger again...");
   p = -1;
   while (p != FINGERPRINT_OK) {
     p = finger.getImage();
   }
 
+  // Second Scan Loop
   p = finger.image2Tz(2);
-  if (p != FINGERPRINT_OK) {
-    Serial.println("Conversion error.");
-    return;
-  }
+  if (p != FINGERPRINT_OK) return;
 
   p = finger.createModel();
+  lcd.clear();
   if (p == FINGERPRINT_OK) {
-    p = finger.storeModel(id);
+    p = finger.storeModel(targetId);
     if (p == FINGERPRINT_OK) {
-      lcd.clear();
       lcd.print("SUCCESS!");
       lcd.setCursor(0, 1);
       lcd.print("Saved to ID #");
-      lcd.print(id);
-      Serial.println("Stored successfully!");
+      lcd.print(targetId);
     } else {
-      Serial.println("Error storing model.");
+      lcd.print("Storage Error");
     }
   } else {
-    Serial.println("Fingerprints did not match.");
+    lcd.print("No Match Found");
   }
-  delay(2000);
+  delay(2500);
 }
 
-// 3. Deletion Mode
-void deleteFinger() {
-  Serial.println("\n[DELETION MODE]");
-  Serial.println("Enter the ID # (1 to 127) you want to delete:");
-  
-  while (!Serial.available());
-  int id = Serial.parseInt();
-  if (id == 0) return;
-
+// 3. Standalone UI Deletion Mode (Using Hardware Buttons)
+void deleteFingerStandalone() {
+  int targetId = 1;
   lcd.clear();
-  lcd.print("Deleting ID: ");
-  lcd.print(id);
 
-  int p = finger.deleteModel(id);
-  lcd.clear();
-  if (p == FINGERPRINT_OK) {
-    lcd.print("ID Deleted.");
-    Serial.print("Successfully deleted ID #");
-    Serial.println(id);
-  } else {
-    lcd.print("Delete Failed.");
-    Serial.println("Failed to delete ID or ID not found.");
+  // Loop to pick the ID to wipe
+  while (true) {
+    lcd.setCursor(0, 0);
+    lcd.print("Wipe User Data ");
+    lcd.setCursor(0, 1);
+    lcd.print("Delete ID: ");
+    lcd.print(targetId);
+    lcd.print("   "); 
+
+    if (digitalRead(BTN_UP) == LOW) {
+      targetId++;
+      if (targetId > 127) targetId = 1;
+      delay(200);
+    }
+    if (digitalRead(BTN_DOWN) == LOW) {
+      targetId--;
+      if (targetId < 1) targetId = 127;
+      delay(200);
+    }
+    if (digitalRead(BTN_ENROLL) == LOW) {
+      return; // Cancel out safely
+    }
+    if (digitalRead(BTN_DELETE) == LOW) {
+      delay(500); // Confirm deletion
+      break; 
+    }
   }
-  delay(2000);
+
+  lcd.clear();
+  int p = finger.deleteModel(targetId);
+  if (p == FINGERPRINT_OK) {
+    lcd.print("ID #"); lcd.print(targetId);
+    lcd.setCursor(0, 1);
+    lcd.print("Wiped Clean.");
+  } else {
+    lcd.print("Deletion Failed");
+  }
+  delay(2500);
 }
