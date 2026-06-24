@@ -1,5 +1,11 @@
 # Biometric Fingerprint Access Control System
 
+
+
+https://github.com/user-attachments/assets/1d6d2333-7021-4c5f-860f-755ca27ffc26
+
+
+
 A standalone biometric security system built as an **IoT Club Project**. It uses an optical fingerprint sensor to store, delete, and verify user fingerprints, providing real-time visual feedback on a direct-wired 16x2 parallel LCD screen. 
 
 Instead of using an I2C adapter, this project interfaces directly with the 16-pin LCD configuration using a 4-bit parallel data bus.
@@ -49,6 +55,14 @@ Because this setup bypasses an I2C breakout board, the connections use a standar
 | **Pin 14 (D7)** | **Pin 2** | Data Bit 7 |
 | **Pin 15 (A)** | 5V (via 220Ω resistor) | Backlight Anode |
 | **Pin 16 (K)** | GND | Backlight Cathode |
+
+### 3. Push-Button Configurations (Active LOW with Internal Pullups)
+| Hardware Button | Arduino Pin | Action Description |
+|---|---|---|
+| **Enroll Button** | **Pin 6** | Opens Enrollment Mode / Confirms Selections |
+| **Delete Button** | **Pin 7** | Opens Deletion Mode / Acts as Cancel |
+| **UP Button** | **Pin 8** | Increments local ID selections (1 - 127) |
+| **DOWN Button** | **Pin 13** | Decrements local ID selections (1 - 127) |
 
 ---
 
